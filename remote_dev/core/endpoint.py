@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .errors import EndpointError
+from .errors import EndpointError, caller_error
 
 DEFAULT_USER = os.environ.get("REMOTE_DEV_DEFAULT_USER", "root")
 DEFAULT_ROOT = os.environ.get("REMOTE_DEV_DEFAULT_ROOT", "/")
@@ -497,8 +497,9 @@ def resolve_endpoint(payload: dict[str, Any]) -> Endpoint:
             return endpoint
     known = ", ".join(selector_fields())
     resolvers = ", ".join(entry.name for entry in registered_resolvers()) or "none"
-    raise EndpointError(
+    raise caller_error(
         "no endpoint target: provide host and port together, an alias from the "
         f"endpoint alias files, or a selector understood by a registered resolver "
-        f"(known selector fields: {known}; registered resolvers: {resolvers})"
+        f"(known selector fields: {known}; registered resolvers: {resolvers})",
+        EndpointError,
     )

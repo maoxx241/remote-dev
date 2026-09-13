@@ -37,12 +37,16 @@ sys.addaudithook(audit)
             home.mkdir()
             env = os.environ.copy()
             source = str(Path(__file__).resolve().parents[1])
-            env.update(PYTHONPATH=os.pathsep.join((str(root), source)), HOME=str(home), USERPROFILE=str(home))
+            diagnostics = root / "diagnostics"
+            env.update(PYTHONPATH=os.pathsep.join((str(root), source)), HOME=str(home), USERPROFILE=str(home),
+                       LOCALAPPDATA=str(home / "AppData" / "Local"), XDG_STATE_HOME=str(home / ".local" / "state"),
+                       VAWS_DIAGNOSTICS_ROOT=str(diagnostics))
             for key in list(env):
                 if key.startswith("REMOTE_DEV_"):
                     env.pop(key)
-            cases = [(["--help"], 0), (["--unknown-option"], 2), (["read"], 1)]
+            cases = [(["--help"], 0), (["--unknown-option"], 2)]
             cases.extend(([name.replace("_", "-"), "--help"], 0) for name in TOOL_NAMES)
+            cases.append((["read"], 1))
             for argv, expected in cases:
                 with self.subTest(argv=argv):
                     result = subprocess.run(
@@ -52,7 +56,17 @@ sys.addaudithook(audit)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     self.assertNotIn("AssertionError", result.stdout + result.stderr)
                     if argv == ["read"]:
-                        self.assertEqual(json.loads(result.stdout)["result"]["status"], "endpoint_required")
+                        payload = json.loads(result.stdout)["result"]
+                        self.assertEqual(payload["status"], "endpoint_required")
+                        self.assertEqual(payload["error_details"]["category"], "caller")
+                        self.assertEqual(payload["error_details"]["submission_state"], "not_sent")
+                        events = [json.loads(line) for path in diagnostics.glob("events/*/*.jsonl")
+                                  for line in path.read_text(encoding="utf-8").splitlines()]
+                        ended = [event for event in events if event["event"] == "operation.end"]
+                        self.assertEqual(len(ended), 1)
+                        self.assertEqual(ended[0]["attributes"]["category"], "caller")
+                    else:
+                        self.assertFalse(diagnostics.exists(), "parser-only feedback must not start logging")
             self.assertEqual(list(home.iterdir()), [])
 
     def test_cli_wrappers_have_help(self) -> None:
