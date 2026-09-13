@@ -31,7 +31,9 @@ def audit(event, args):
 sys.addaudithook(audit)
 '''
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # macOS temporary directories can start at the /var system
+            # symlink. Diagnostics deliberately require a canonical root.
+            root = Path(tmp).resolve()
             (root / "sitecustomize.py").write_text(guard, encoding="utf-8")
             home = root / "home"
             home.mkdir()
@@ -60,6 +62,7 @@ sys.addaudithook(audit)
                         self.assertEqual(payload["status"], "endpoint_required")
                         self.assertEqual(payload["error_details"]["category"], "caller")
                         self.assertEqual(payload["error_details"]["submission_state"], "not_sent")
+                        self.assertFalse(payload["diagnostics"]["logging_failed"])
                         events = [json.loads(line) for path in diagnostics.glob("events/*/*.jsonl")
                                   for line in path.read_text(encoding="utf-8").splitlines()]
                         ended = [event for event in events if event["event"] == "operation.end"]
