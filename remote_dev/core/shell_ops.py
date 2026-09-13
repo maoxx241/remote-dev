@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import shlex
 from typing import Any
 
@@ -28,6 +30,7 @@ def _cwd_outside_root_next(cwd: str) -> dict[str, Any]:
     }
 
 
+@observed_tool("remote.bash")
 @pinned_endpoint
 def remote_bash(
     endpoint: Endpoint,

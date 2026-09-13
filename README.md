@@ -42,8 +42,8 @@ On a failed shared connection, the fixed probe may compare an independent
 connection. It never retries an arbitrary business command. Ordinary bash
 results also include transport timings without enabling verbose SSH tracing.
 
-Runtime requirements: Python 3.9+ and an `ssh` client. No third-party
-packages. Nothing here needs GPU/NPU hardware; the remote host only needs
+Local runtime requirements: Python 3.11+, an `ssh` client, and the pinned
+`vaws-diagnostics` package installed with the client. Nothing here needs GPU/NPU hardware; the remote host only needs
 `bash`, `python3`, and (for `remote.apply_patch` unified diffs) `git`.
 
 ## Work inside an existing container
@@ -566,3 +566,45 @@ connection mode and timeout. A timeout or exit 255 leaves remote outcome unknown
 `remote_dev.diagnostics.open_http` selects `direct` or `environment` proxy use
 per call. Its companion diagnostics strip URL credentials and query parameters,
 and distinguish HTTP status from DNS, timeout and connection errors.
+
+
+## Diagnostics
+
+Version 0.9.0 requires Python 3.11 or newer for the local client, including its
+shared diagnostics dependency. The self-contained remote helpers retain their
+existing interpreter requirements; logging does not install or upgrade anything
+on the remote host. Coordinator clients using `remote_dev.observability` require
+this release or newer.
+
+Tool replies include `diagnostics` with an operation ID, trace ID, actual UTC
+start/end, monotonic duration, bounded phase summaries and a local `record_ref`.
+The operation ID exists before work starts. A run admission's duration describes
+that call; its asynchronous execution and later wait have separate lifetimes.
+Native MCP metadata propagates correlation automatically. Diagnostic IDs never
+grant task or endpoint authority and are excluded from launch-content identity.
+
+`VAWS_LOG_LEVEL=INFO` is the default. `DEBUG` adds RPC, lock and transport phase
+detail; `WARN`/`WARNING` retains warnings and errors. `VAWS_DIAGNOSTICS_ROOT`
+selects a private local log root. The shared diagnostics package rotates bounded
+per-process JSONL files and records package versions. Commands, file contents,
+environment values and credentials are not logging arguments. Business output
+remains in existing job logs and tool output, separate from implementation logs.
+MCP reserves its protocol descriptors: Python and native stdout writes go to
+stderr, and child processes cannot inherit protocol stdin accidentally.
+
+`error_details` preserves category, retryability and submission certainty.
+`not_sent` / `not_executed` indicate a known pre-execution boundary;
+`uncertain` requires observing the existing job/execution reference, without
+resubmission. `acknowledged` means the remote request was accepted, not that its
+business succeeded. Only an explicit `caller` category denotes known caller
+input error; a generic validation or permission exception is not that judgment.
+Cancellation/observation timeout does not fabricate quiet or resource release.
+Logging/export disk errors do not change business results or ownership; failures
+to persist authoritative execution state still fail.
+
+For a local issue attachment, the shared `vaws-diagnostics bundle` command makes
+an offline, bounded public projection from diagnostic events. Use the returned
+operation ID. It excludes raw commands, paths, endpoints and business logs, and
+reports missing or truncated evidence. It never replays work or uploads an issue
+by itself. Monotonic clocks are process-local: do not subtract remote/local UTC
+stamps or sum overlapping RPC, command and parallel-role phase durations.

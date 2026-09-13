@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import time
 from typing import Any
 from .locking import serialize_mutation
@@ -323,6 +325,7 @@ def _status_to_outcome(status: str) -> str:
     return "failed"
 
 
+@observed_tool("remote.read")
 @pinned_endpoint
 def remote_read(
     endpoint: Endpoint,
@@ -382,12 +385,13 @@ def remote_read(
         preview={"content": compact_text(str(file_info.get("content", ""))), "partial": file_info.get("partial", False)},
         refs=refs,
         warnings=warnings,
-        extra={"file": {k: v for k, v in file_info.items() if k != "content"}, "error": data.get("error"), "ledger_scope": ledger_scope},
+        extra={"file": {k: v for k, v in file_info.items() if k != "content"}, "error": data.get("error"), "error_details": data.get("error_details"), "ledger_scope": ledger_scope},
     )
     text = _format_read_text(endpoint, result, file_info)
     return {"text": text, "result": result}
 
 
+@observed_tool("remote.ls")
 @pinned_endpoint
 def remote_ls(
     endpoint: Endpoint,
@@ -421,11 +425,12 @@ def remote_ls(
         started_at=started,
         duration_ms=_duration_ms(start),
         preview={"entries": entries, "truncated": bool(data.get("truncated", False))},
-        extra={"path": data.get("path", resolved), "entries": entries, "truncated": bool(data.get("truncated", False)), "error": data.get("error")},
+        extra={"path": data.get("path", resolved), "entries": entries, "truncated": bool(data.get("truncated", False)), "error": data.get("error"), "error_details": data.get("error_details")},
     )
     return {"text": _format_ls_text(endpoint, result), "result": result}
 
 
+@observed_tool("remote.write")
 @serialize_mutation
 def remote_write(
     endpoint: Endpoint,
@@ -468,6 +473,7 @@ def remote_write(
     return _write_like_result(endpoint, "remote.write", path, data, started, start, client_context_id=client_context_id)
 
 
+@observed_tool("remote.edit")
 @serialize_mutation
 def remote_edit(
     endpoint: Endpoint,
@@ -508,6 +514,7 @@ def remote_edit(
     return _write_like_result(endpoint, "remote.edit", path, data, started, start, client_context_id=client_context_id)
 
 
+@observed_tool("remote.multi_edit")
 @serialize_mutation
 def remote_multi_edit(
     endpoint: Endpoint,
@@ -616,7 +623,7 @@ def _write_like_result(
         preview={"diff": data.get("diff_preview", "")},
         refs=refs,
         changed_files=changed,
-        extra={"file": file_info, "error": data.get("error"), "ledger_scope": ledger_scope},
+        extra={"file": file_info, "error": data.get("error"), "error_details": data.get("error_details"), "ledger_scope": ledger_scope},
     )
     return {"text": _format_write_text(endpoint, result, data), "result": result}
 

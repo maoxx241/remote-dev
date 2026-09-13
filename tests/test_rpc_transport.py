@@ -160,6 +160,17 @@ print(json.dumps({'status':'ok'}))
         self.assertEqual(failed["exit_code"], 7)
         invalid = ssh_transport.run_remote_python(self.endpoint, "print('plain text')", {})
         self.assertIn("non-JSON", invalid["error"])
+        self.assertEqual(invalid["error_details"]["submission_state"], "acknowledged")
+
+    def test_remote_value_error_retains_acknowledgment_without_becoming_caller_error(self):
+        from remote_dev.core.errors import error_details
+        source = "def control_job(payload, source, event): raise ValueError('internal decode failed')"
+        with self.assertRaises(ValueError) as caught:
+            rpc_transport.request(self.endpoint, "control", source, {})
+        details = error_details(caught.exception)
+        self.assertEqual(details["category"], "remote_worker")
+        self.assertEqual(details["submission_state"], "acknowledged")
+        self.assertFalse(details["retryable"])
 
     def test_control_requests_have_capacity_when_all_normal_slots_are_waiting(self):
         self.request({})

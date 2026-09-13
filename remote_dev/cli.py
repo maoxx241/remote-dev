@@ -11,6 +11,8 @@ from remote_dev import package_version
 from remote_dev.core.endpoint import EndpointError, has_selector, resolve_endpoint
 from remote_dev.mcp.schemas import TOOL_SCHEMAS, normalize_arguments
 from remote_dev.result import make_result
+from remote_dev.observability import observed_tool
+from remote_dev.core.errors import error_details
 
 TOOL_NAMES = tuple(name.removeprefix("remote.") for name in TOOL_SCHEMAS)
 
@@ -93,7 +95,7 @@ def print_payload(payload: dict[str, Any]) -> int:
     return 0 if payload.get("result", {}).get("outcome") in {"success", "cancelled"} else 1
 
 
-def error_payload(tool: str, *, outcome: str, status: str, error: str) -> dict[str, Any]:
+def error_payload(tool: str, *, outcome: str, status: str, error: str, exception=None) -> dict[str, Any]:
     result = make_result(
         tool=f"remote.{tool}",
         target={"kind": "unresolved"},
@@ -101,8 +103,13 @@ def error_payload(tool: str, *, outcome: str, status: str, error: str) -> dict[s
         status=status,
         summary=f"remote.{tool} {status}.",
         preview={"stderr": error[-4000:]},
-        extra={"error": error},
+        extra={"error": error, **({"error_details": error_details(exception)} if exception is not None else {})},
     )
+    operation = getattr(exception, "_diagnostic_operation", None)
+    if operation is not None:
+        summary = operation.summary()
+        result.update(invocation_id=summary["operation_id"], started_at=summary["started_at"],
+                      duration_ms=summary["duration_ms"], diagnostics=summary)
     return {"text": result["summary"] + "\n" + error + "\n", "result": result}
 
 
@@ -207,6 +214,7 @@ def load_input_json(path: str) -> dict[str, Any]:
     return data
 
 
+@observed_tool(lambda tool, args: "remote." + tool)
 def run_tool(tool: str, args: argparse.Namespace) -> dict[str, Any]:
     data = {key: value for key, value in vars(args).items() if value is not None}
     data.update(endpoint_payload(args))
@@ -241,13 +249,13 @@ def run_tool_main(tool: str, argv: list[str] | None = None) -> int:
     try:
         return print_payload(run_tool(tool, args))
     except EndpointError as exc:
-        return print_payload(error_payload(tool, outcome="needs_input", status="endpoint_required", error=str(exc)))
+        return print_payload(error_payload(tool, outcome="needs_input", status="endpoint_required", error=str(exc), exception=exc))
     except FileNotFoundError as exc:
-        return print_payload(error_payload(tool, outcome="needs_input", status="not_found", error=str(exc)))
+        return print_payload(error_payload(tool, outcome="needs_input", status="not_found", error=str(exc), exception=exc))
     except ValueError as exc:
-        return print_payload(error_payload(tool, outcome="needs_input", status="invalid_input", error=str(exc)))
+        return print_payload(error_payload(tool, outcome="needs_input", status="invalid_input", error=str(exc), exception=exc))
     except Exception as exc:  # noqa: BLE001
-        return print_payload(error_payload(tool, outcome="failed", status="exception", error=f"{type(exc).__name__}: {exc}"))
+        return print_payload(error_payload(tool, outcome="failed", status="exception", error=f"{type(exc).__name__}: {exc}", exception=exc))
 
 
 def _status_main() -> int:

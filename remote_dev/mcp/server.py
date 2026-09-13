@@ -6,6 +6,9 @@ import os
 import sys
 import uuid
 import threading
+import io
+from vaws_diagnostics import wrap_context, bind_context
+from remote_dev.observability import protocol_streams
 from concurrent.futures import ThreadPoolExecutor
 from remote_dev.core.cancellation import request_context
 from typing import Any
@@ -20,6 +23,7 @@ LOADED_RUNTIME = process_identity("vaws-remote-dev")
 LOADED_VERSION = package_version()
 _OUTPUT_LOCK = threading.Lock()
 _DISPATCHER = None
+_PROTOCOL_WRITER = None
 
 
 def encode_payload(payload: dict[str, Any]) -> bytes:
@@ -29,6 +33,10 @@ def encode_payload(payload: dict[str, Any]) -> bytes:
 def send(payload: dict[str, Any], *, framed: bool = False) -> None:
     with _OUTPUT_LOCK:
         encoded = encode_payload(payload)
+        if _PROTOCOL_WRITER is not None:
+            _PROTOCOL_WRITER.write((f"Content-Length: {len(encoded)}\r\n\r\n".encode("ascii") if framed else b"") + encoded + (b"" if framed else b"\n"))
+            _PROTOCOL_WRITER.flush()
+            return
         if framed:
             sys.stdout.buffer.write(f"Content-Length: {len(encoded)}\r\n\r\n".encode("ascii"))
             sys.stdout.buffer.write(encoded)
@@ -94,7 +102,8 @@ def handle(message: dict[str, Any], *, framed: bool = False) -> None:
                 raise ValueError("tools/call requires string name")
             if not isinstance(arguments, dict):
                 raise ValueError("tools/call arguments must be an object")
-            payload = call_tool(name, arguments)
+            with bind_context((params.get("_meta") or {}).get("vaws_diagnostics") or {}):
+                payload = call_tool(name, arguments)
             payload["result"]["runtime"] = runtime_status(LOADED_RUNTIME)
             result(
                 request_id,
@@ -113,7 +122,9 @@ def handle(message: dict[str, Any], *, framed: bool = False) -> None:
         else:
             error(request_id, -32601, f"method not found: {method}", framed=framed)
     except Exception as exc:  # noqa: BLE001
-        error(request_id, -32000, str(exc), {"type": type(exc).__name__}, framed=framed)
+        from remote_dev.core.errors import error_details
+        error(request_id, -32000, str(exc), {**error_details(exc),
+              **({"diagnostics": exc.diagnostics} if hasattr(exc, "diagnostics") else {})}, framed=framed)
 
 
 class Dispatcher:
@@ -170,7 +181,7 @@ class Dispatcher:
                 with self.lock:
                     self.pending.pop(identifier, None)
                 capacity.release()
-        executor.submit(execute)
+        executor.submit(wrap_context(execute))
 
     def close(self):
         with self.lock:
@@ -233,6 +244,20 @@ def read_line_messages() -> int:
 
 
 def main() -> int:
+    global _PROTOCOL_WRITER
+    with protocol_streams() as (reader, writer):
+        original = sys.stdin
+        sys.stdin = io.TextIOWrapper(reader, encoding="utf-8")
+        _PROTOCOL_WRITER = writer
+        try:
+            return _serve()
+        finally:
+            sys.stdin.detach()
+            sys.stdin = original
+            _PROTOCOL_WRITER = None
+
+
+def _serve() -> int:
     if os.name == "nt":
         for stream in (sys.stdin, sys.stdout, sys.stderr):
             if hasattr(stream, "reconfigure"):

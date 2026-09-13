@@ -272,6 +272,7 @@ def worker(directory):
     elif interactive:
         pipe_r, pipe_w = os.pipe()
         os.set_blocking(pipe_w, False)
+    command_started = time.monotonic()
     with (directory / "stdout.log").open("ab") as stdout, (directory / "stderr.log").open("ab") as stderr:
         environment = {**os.environ, **spec["env"]}
         if tty:
@@ -294,13 +295,17 @@ def worker(directory):
         receipt = read_json(directory / "receipt.json")
         timeout_seconds = spec.get("timeout_seconds")
         deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        spawned_at = time.monotonic()
         stopping_at, terminal = None, None
+        shell_exit_observed = None
         pending_stdin = bytearray()
         stdin_eof = False
         fifo_drained = False
         terminal_eof_sent = False
         while True:
             code = child.poll()
+            if code is not None and shell_exit_observed is None:
+                shell_exit_observed = time.monotonic()
             if master_fd is not None:
                 # Drain the PTY into the same durable output log. stdout and
                 # stderr share a terminal, as with a native tty session.
@@ -385,8 +390,14 @@ def worker(directory):
             os.close(pipe_w)
         if fifo_fd is not None:
             os.close(fifo_fd)
+        command_finished = time.monotonic()
+        shell_exit_observed = shell_exit_observed if shell_exit_observed is not None else command_finished
         result = {"state": terminal or ("succeeded" if code == 0 else "failed"),
-                  "exit_code": code, "descendants_drained": True, "finished_at": time.time()}
+                  "exit_code": code, "descendants_drained": True, "finished_at": time.time(),
+                  "timings": {"clock_domain": "remote-supervisor:" + boot_id() + ":" + str(os.getpid()),
+                              "spawn_ms": round((spawned_at - command_started) * 1000, 3),
+                              "shell_ms": round((shell_exit_observed - spawned_at) * 1000, 3),
+                              "descendant_drain_ms": round((command_finished - shell_exit_observed) * 1000, 3)}}
         atomic_json(directory / "result.json", result)
 
 
@@ -525,6 +536,9 @@ def control_job(request, source, cancel_event=None):
             if not identity or identity["pgid"] != process.pid:
                 raise RuntimeError("waiting supervisor has no verified process identity")
             atomic_json(directory / "receipt.json", {**identity, "boot_id": boot_id(), "marker": marker,
+                                                      "diagnostics_context": {key: value for key, value in (request.get("diagnostics_context") or {}).items()
+                                                          if key in {"trace_id", "operation_id", "parent_operation_id"}
+                                                          and isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value)},
                                                       "supervision": "subreaper", "job_id": identifier,
                                                       "prepared_timeout_seconds": prepared_timeout,
                                                       "prepared_at": time.time()})

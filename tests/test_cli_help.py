@@ -81,7 +81,7 @@ sys.addaudithook(audit)
             args = cli.build_parser("write").parse_args(["--host", "example.invalid", "--port", "22",
                 "--content-file", str(content), "--input-json", str(arguments)])
             with mock.patch.object(tools, "remote_write", return_value={"ok": True}) as write:
-                self.assertEqual(cli.run_tool("write", args), {"ok": True})
+                self.assertTrue(cli.run_tool("write", args)["ok"])
                 self.assertEqual(write.call_args.kwargs["content"], "file body")
                 self.assertEqual(write.call_args.kwargs["file_path"], "/tmp/example")
                 self.assertTrue(write.call_args.kwargs["overwrite"])

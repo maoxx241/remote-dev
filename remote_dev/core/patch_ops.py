@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import shlex
 import time
 import uuid
@@ -389,6 +391,7 @@ def _duration_ms(start: float) -> int:
     return int(round((time.monotonic() - start) * 1000))
 
 
+@observed_tool("remote.apply_patch")
 @serialize_mutation
 def remote_apply_patch(
     endpoint: Endpoint,
@@ -591,7 +594,7 @@ def _patch_result(
         duration_ms=_duration_ms(start),
         preview={"diff": data.get("diff_preview", ""), "diffstat": data.get("diffstat", "")},
         changed_files=changed,
-        extra={"error": data.get("error")},
+        extra={"error": data.get("error"), "error_details": data.get("error_details")},
     )
     ref_path = patch_dir / f"{result['invocation_id']}.json"
     result["refs"]["metadata"] = str(ref_path)

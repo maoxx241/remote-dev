@@ -53,15 +53,17 @@ def make_result(
     next: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from remote_dev.observability import current_tool
+    operation = current_tool()
     payload: dict[str, Any] = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "tool": tool,
-        "invocation_id": invocation_id or new_invocation_id(),
+        "invocation_id": invocation_id or (operation["op"].operation_id if operation else new_invocation_id()),
         "target": target,
         "outcome": outcome,
         "status": status,
         "summary": summary,
-        "started_at": started_at or utc_now_iso(),
+        "started_at": started_at or (operation["started_at"] if operation else utc_now_iso()),
         "duration_ms": duration_ms,
         "preview": preview or {},
         "refs": refs or {},

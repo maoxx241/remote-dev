@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import threading
+import uuid
 
 
 # REMOTE_DEV_MUTATION_LOCK
@@ -29,6 +30,7 @@ def main():
     codes = OrderedDict()
     modules = OrderedDict()
     module_lock = threading.Lock()
+    process_instance = uuid.uuid4().hex
     capacity = threading.BoundedSemaphore(32)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
     control_capacity = threading.BoundedSemaphore(8)
@@ -41,10 +43,14 @@ def main():
 
     def execute(message, cancelled, admission):
         identifier = message["id"]
+        import time
+        started = time.monotonic()
+        submission_state = "not_executed"
         try:
             if cancelled.is_set():
                 raise RuntimeError("request cancelled before execution")
             source = message["_source"]
+            submission_state = "acknowledged"
             if message["kind"] == "control":
                 with module_lock:
                     namespace = modules.get(message["code_key"])
@@ -91,9 +97,13 @@ def main():
                         proc.wait()
             else:
                 raise ValueError("unsupported RPC operation")
-            send({"id": identifier, "result": result})
+            send({"id": identifier, "result": result,
+                  "diagnostics": {"elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+                                  "clock_domain": process_instance, "pid": os.getpid(),
+                                  "context": message.get("diagnostics_context") or {}}})
         except BaseException as exc:
-            send({"id": identifier, "error": {"type": type(exc).__name__, "message": str(exc)[:4000]}})
+            send({"id": identifier, "error": {"type": type(exc).__name__, "message": str(exc)[:4000],
+                  "category": "remote_worker", "submission_state": submission_state}})
         finally:
             with pending_lock:
                 pending.pop(identifier, None)
@@ -126,7 +136,8 @@ def main():
             admission = control_capacity if short_control else capacity
             selected_executor = control_executor if short_control else executor
             if not admission.acquire(blocking=False):
-                send({"id": identifier, "error": {"type": "RuntimeError", "message": "RPC capacity exhausted; request was not executed"}})
+                send({"id": identifier, "error": {"type": "RuntimeError", "message": "RPC capacity exhausted; request was not executed",
+                      "category": "worker_capacity", "submission_state": "not_executed", "retryable": True}})
                 continue
             cancelled = threading.Event()
             with pending_lock:

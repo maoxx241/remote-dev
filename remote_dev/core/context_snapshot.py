@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import time
 from typing import Any
 
@@ -88,6 +90,7 @@ def _duration_ms(start: float) -> int:
     return int(round((time.monotonic() - start) * 1000))
 
 
+@observed_tool("remote.probe")
 @pinned_endpoint
 def remote_probe(endpoint: Endpoint, *, timeout_ms: int = 120000, diagnose_connection: bool = False, modules: list[str] | None = None) -> dict[str, Any]:
     if diagnose_connection:
@@ -115,7 +118,7 @@ def remote_probe(endpoint: Endpoint, *, timeout_ms: int = 120000, diagnose_conne
         duration_ms=_duration_ms(start),
         preview={"summary": summary},
         refs=snapshot.get("refs", {}) if isinstance(snapshot, dict) else {},
-        extra={"snapshot": snapshot, "error": data.get("error"), "probe": data},
+        extra={"snapshot": snapshot, "error": data.get("error"), "error_details": data.get("error_details"), "probe": data},
     )
     text = "RemoteProbe {status} on {user}@{host}:{port}\n".format(
         status=status,
@@ -131,6 +134,7 @@ def remote_probe(endpoint: Endpoint, *, timeout_ms: int = 120000, diagnose_conne
     return {"text": text, "result": result}
 
 
+@observed_tool("remote.context_snapshot")
 @pinned_endpoint
 def remote_context_snapshot(endpoint: Endpoint, *, timeout_ms: int = 120000, live_probe: bool = True) -> dict[str, Any]:
     if live_probe:

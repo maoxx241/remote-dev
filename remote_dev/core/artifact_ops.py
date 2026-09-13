@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import hashlib
 import time
 import uuid
@@ -14,7 +16,7 @@ from .path_policy import join_under_root
 from remote_dev.result import make_result, utc_now_iso
 from .ssh_transport import run_remote_python
 from .artifact_transport import ArtifactStream, ArtifactTransferError
-from .errors import RemoteExecutionError
+from .errors import RemoteExecutionError, error_details
 from .state_store import atomic_write_json, ensure_endpoint_state
 
 REMOTE_MANIFEST_PY = r'''
@@ -153,6 +155,7 @@ def _safe_local_artifact_path(base: Path, relpath: str) -> Path:
     return candidate
 
 
+@observed_tool("remote.artifact_manifest")
 @pinned_endpoint
 def remote_artifact_manifest(endpoint: Endpoint, *, remote_path: str, timeout_ms: int = 120000) -> dict[str, Any]:
     started = utc_now_iso()
@@ -197,7 +200,7 @@ def remote_artifact_manifest(endpoint: Endpoint, *, remote_path: str, timeout_ms
         duration_ms=_duration_ms(start),
         refs={"local_manifest": str(manifest_path)} if manifest_path else {},
         artifacts=[data] if status == "ok" else [],
-        extra={"manifest": data, "error": data.get("error")},
+        extra={"manifest": data, "error": data.get("error"), "error_details": data.get("error_details")},
     )
     return {"text": f"RemoteArtifactManifest {status}: {path}\nfiles: {data.get('file_count', 0)}\n", "result": result}
 
@@ -210,10 +213,11 @@ def _transfer_failure(endpoint, tool, started, start, exc, evidence):
     result = make_result(tool=tool, target=endpoint.to_result_target(), outcome=outcome,
                          status=status, summary=f"Artifact transfer {status}.", started_at=started,
                          duration_ms=_duration_ms(start), preview={"stderr": message}, artifacts=[evidence],
-                         extra={"expected_sha256": getattr(exc, "expected_sha256", None), "observed_sha256": getattr(exc, "observed_sha256", None)})
+                         extra={"error_details": error_details(exc), "expected_sha256": getattr(exc, "expected_sha256", None), "observed_sha256": getattr(exc, "observed_sha256", None)})
     return {"text": result["summary"] + "\n" + message + "\n", "result": result}
 
 
+@observed_tool("remote.artifact_pull")
 @serialize_mutation
 def remote_artifact_pull(endpoint: Endpoint, *, remote_path: str, local_dir: str | None = None,
                          timeout_ms: int = 120000) -> dict[str, Any]:
@@ -249,6 +253,7 @@ def remote_artifact_pull(endpoint: Endpoint, *, remote_path: str, local_dir: str
     return {"text": f"RemoteArtifactPull completed\nlocal_dir: {base}\npulled: {len(pulled)}\nskipped: {len(skipped)}\n", "result": result}
 
 
+@observed_tool("remote.artifact_push")
 @serialize_mutation
 def remote_artifact_push(endpoint: Endpoint, *, local_path: str, remote_path: str,
                          timeout_ms: int = 120000) -> dict[str, Any]:

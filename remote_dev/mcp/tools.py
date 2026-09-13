@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from remote_dev.observability import observed_tool
+from remote_dev.core.errors import caller_error
 
 from remote_dev.core.artifact_ops import remote_artifact_manifest, remote_artifact_pull, remote_artifact_push
 from remote_dev.core.context_snapshot import remote_context_snapshot, remote_probe
@@ -205,15 +207,16 @@ def _require(args: dict[str, Any], key: str, tool: str, alias_hint: str = "") ->
     value = args.get(key)
     if value is None or (isinstance(value, str) and not value):
         hint = f" (alias: {alias_hint})" if alias_hint else ""
-        raise ValueError(f"{tool} requires {key}{hint}")
+        raise caller_error(f"{tool} requires {key}{hint}")
     return value
 
 
+@observed_tool(lambda name, arguments=None: canonical_name(name))
 def call_tool(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
     args = arguments or {}
     name = canonical_name(name)
     if name not in TOOL_SCHEMAS:
-        raise KeyError(f"unknown remote-dev tool: {name}")
+        raise caller_error(f"unknown remote-dev tool: {name}", KeyError)
     allowed = set(TOOL_SCHEMAS[name]["properties"]) | set(PARAM_ALIASES.get(name, {})) | set(selector_fields())
     # The common timeout applies to the file/search/artifact operations too.
     allowed.update({"timeout", "timeout_ms"})
@@ -222,7 +225,7 @@ def call_tool(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
         hint = ""
         if name == "remote.bash" and "wait" in unknown:
             hint = "; use yield_time_ms and continue with session_id; wait=True is only a Python SDK option"
-        raise ValueError(f"{name} received unsupported argument(s): {', '.join(sorted(unknown))}{hint}")
+        raise caller_error(f"{name} received unsupported argument(s): {', '.join(sorted(unknown))}{hint}")
     args = normalize_arguments(name, args)
     endpoint = None
     # Job tools can locate their endpoint from the local job record, so they

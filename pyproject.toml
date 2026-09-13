@@ -4,15 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vaws-remote-dev"
-version = "0.8.0"
+version = "0.9.0"
 description = "Remote development substrate: SSH-backed twins of local agent tools"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [{ name = "Qi Mao" }]
+dependencies = [
+  "vaws-diagnostics @ git+https://github.com/vllm-ascend-workspace/vaws-diagnostics@3304661fd44c1f10e26d88b48e5d63dce1886810",
+]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
@@ -21,7 +24,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "mcp==1.30.0"]
 
 [project.scripts]
 remote-dev = "remote_dev.cli:main"
@@ -44,6 +47,9 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["remote_dev"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel.force-include]
 "remote_dev/schemas/artifact.schema.json" = "remote_dev/schemas/artifact.schema.json"

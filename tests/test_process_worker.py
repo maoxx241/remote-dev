@@ -85,6 +85,23 @@ class ProcessWorkerTests(unittest.TestCase):
         self.assertEqual(self.until(identifier, lambda row: row["quiet"])["state"], "succeeded")
         self.assertEqual((self.root / "result.txt").read_text(), "completed")
 
+    def test_correlation_is_receipt_metadata_not_launch_identity_and_timings_are_drained(self):
+        identifier = "job-" + "z" * 8
+        self.identifiers.append(identifier)
+        spec = {"cwd": str(self.root), "command": "printf once >> counted; sleep .15 &", "env": {}, "timeout_seconds": 5}
+        context = {"trace_id": "a" * 32, "operation_id": "b" * 32, "user": "not-authority"}
+        first = self.call(identifier, "prepare", spec=spec, diagnostics_context=context)
+        second = self.call(identifier, "prepare", spec=spec, diagnostics_context={"trace_id": "c" * 32})
+        self.assertEqual(first["receipt"]["pid"], second["receipt"]["pid"])
+        self.assertEqual(second["receipt"]["diagnostics_context"], {"trace_id": "a" * 32, "operation_id": "b" * 32})
+        self.go(identifier)
+        result = self.until(identifier, lambda row: row["quiet"])["result"]
+        self.assertTrue(result["descendants_drained"])
+        self.assertEqual((self.root / "counted").read_text(), "once")
+        self.assertGreater(result["timings"]["descendant_drain_ms"], 50)
+        self.assertGreaterEqual(result["timings"]["spawn_ms"], 0)
+        self.assertGreaterEqual(result["timings"]["shell_ms"], 0)
+
     def test_stop_clean_environment_daemon_keeps_the_other_family_alive(self):
         command = (
             "setsid env -u REMOTE_DEV_JOB_TOKEN "

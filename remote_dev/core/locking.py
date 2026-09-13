@@ -6,6 +6,8 @@ import hashlib
 import functools
 import os
 import threading
+import time
+from vaws_diagnostics import get_recorder
 import weakref
 from .cancellation import current_event
 from .errors import RemoteExecutionError
@@ -17,6 +19,7 @@ _locks = weakref.WeakValueDictionary()
 
 @contextlib.contextmanager
 def record_lock(path: Path):
+    started = time.monotonic()
     key = os.path.normcase(str(path.resolve()))
     with _guard:
         lock = _locks.setdefault(key, threading.RLock())
@@ -36,7 +39,6 @@ def record_lock(path: Path):
                 handle.seek(0)
                 # LK_LOCK has a fixed retry limit. An explicit nonblocking
                 # loop permits a long poll without losing the lock contract.
-                import time
                 while True:
                     try:
                         msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
@@ -47,13 +49,13 @@ def record_lock(path: Path):
                             raise RemoteExecutionError("request cancelled before acquiring record lock")
                         time.sleep(0.02)
                 try:
+                    get_recorder("remote-dev").event("DEBUG", "lock.acquired", elapsed_ms=round((time.monotonic() - started) * 1000, 3))
                     yield
                 finally:
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
-                import time
                 while True:
                     try:
                         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -64,6 +66,7 @@ def record_lock(path: Path):
                             raise RemoteExecutionError("request cancelled before acquiring record lock")
                         time.sleep(0.02)
                 try:
+                    get_recorder("remote-dev").event("DEBUG", "lock.acquired", elapsed_ms=round((time.monotonic() - started) * 1000, 3))
                     yield
                 finally:
                     fcntl.flock(handle, fcntl.LOCK_UN)

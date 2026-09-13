@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from functools import lru_cache
 from typing import Any
+from vaws_diagnostics import current_context
 
 from remote_dev.core.endpoint import Endpoint, resolve_endpoint
 from remote_dev.core.errors import RemoteExecutionError
@@ -61,7 +62,8 @@ def control(endpoint: Endpoint | Mapping[str, Any], job_id: str, action: str, **
     if action not in ACTIONS:
         raise ValueError(f"unsupported job action: {action}")
     target = _as_endpoint(endpoint)
-    request = {"root": target.root, "job_id": job_id, "action": action, **parameters}
+    request = {"root": target.root, "job_id": job_id, "action": action, **parameters,
+               "diagnostics_context": current_context()}
     wait_ms = max(0, int(parameters.get("yield_time_ms") or 0))
     data = rpc_request(target, "control", worker_source(), request,
                        timeout_ms=max(CONTROL_TIMEOUT_MS, wait_ms + 15000))

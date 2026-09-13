@@ -15,3 +15,38 @@ class PathPolicyError(RemoteDevError):
 
 class RemoteExecutionError(RemoteDevError):
     """Raised when a remote command cannot be launched cleanly."""
+
+    def __init__(self, message, *, category="remote_execution", submission_state=None, retryable=False):
+        super().__init__(message)
+        self.category = category
+        self.submission_state = submission_state
+        self.retryable = bool(retryable)
+
+
+def error_details(exc):
+    """Keep transport certainty through exception wrappers without parsing prose."""
+    result = {"type": type(exc).__name__, "category": "internal", "retryable": False}
+    current, seen = exc, set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "category", None) == "caller":
+            result.update(category="caller", submission_state="not_sent", retryable=False)
+            break
+        if isinstance(current, RemoteExecutionError) or hasattr(current, "submission_state"):
+            result.update(category=getattr(current, "category", "remote_execution"), retryable=getattr(current, "retryable", False))
+            if getattr(current, "submission_state", None) is not None:
+                result["submission_state"] = current.submission_state
+            break
+        if isinstance(current, (ValueError, TypeError)):
+            result.update(category="validation")
+        elif isinstance(current, PermissionError):
+            result.update(category="permission")
+        current = current.__cause__ or current.__context__
+    return result
+
+
+def caller_error(message, exception_type=ValueError):
+    """Only known pre-dispatch input checks may use this classification."""
+    error = exception_type(message)
+    error.category = "caller"
+    return error

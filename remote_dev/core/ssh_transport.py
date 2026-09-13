@@ -21,6 +21,7 @@ from .endpoint import Endpoint
 from .container_endpoint import pin_container_endpoint, pinned_endpoint
 from .errors import RemoteExecutionError
 from .local_process import OwnedProcess
+from remote_dev.observability import observed_operation
 
 # ControlMaster socket directory. Consumers that already keep an OpenSSH mux
 # directory for their own tooling can point remote-dev at it so both share
@@ -357,6 +358,7 @@ def stream_ssh_command(endpoint: Endpoint, script: str | None, *, timeout_ms: in
 
 
 @pinned_endpoint
+@observed_operation("ssh.script", level="DEBUG")
 def run_script(endpoint: Endpoint, script: str, *, timeout_ms: int | None = None,
                trace_connection: bool = False) -> RemoteCompleted:
     started = time.perf_counter()
@@ -1024,18 +1026,25 @@ def run_remote_python(
         row = request(endpoint, "python", code, payload,
                       timeout_ms=timeout_ms)
     except RemoteExecutionError as exc:
-        return {"status": "failed", "error": str(exc), "remote_outcome": "unknown"}
+        from .errors import error_details
+        details = error_details(exc)
+        return {"status": "failed", "error": str(exc), "error_details": details,
+                "remote_outcome": "not_submitted" if details.get("submission_state") == "not_sent" else "unknown"}
     if row.get("timed_out") or row.get("cancelled"):
         return {"status": "timeout" if row.get("timed_out") else "cancelled",
+                "error_details": {"category": "command_timeout" if row.get("timed_out") else "command_cancelled",
+                                  "submission_state": "acknowledged", "retryable": False},
                 "error": "remote python timed out" if row.get("timed_out") else "remote python cancelled",
                 "stdout_tail": row["stdout"][-4000:], "stderr_tail": row["stderr"][-4000:]}
     if row["returncode"] != 0:
         return {"status": "failed", "error": "remote python failed", "exit_code": row["returncode"],
+                "error_details": {"category": "command_exit", "submission_state": "acknowledged", "retryable": False},
                 "stdout_tail": row["stdout"][-4000:], "stderr_tail": row["stderr"][-4000:]}
     try:
         data = json.loads(row["stdout"].strip())
     except json.JSONDecodeError as exc:
         return {"status": "failed", "error": f"remote python returned non-JSON: {exc}",
+                "error_details": {"category": "command_protocol", "submission_state": "acknowledged", "retryable": False},
                 "stdout_tail": row["stdout"][-4000:], "stderr_tail": row["stderr"][-4000:]}
     return data if isinstance(data, dict) else {"status": "failed", "error": "remote python JSON was not an object"}
 

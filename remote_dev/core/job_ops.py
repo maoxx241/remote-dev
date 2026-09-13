@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import re
 import json
 from dataclasses import asdict
@@ -19,6 +21,7 @@ from remote_dev.core.runtime_env import runtime_env_lines
 from remote_dev.core.state_store import atomic_write_json, find_job_record, job_record_path
 from remote_dev.processes import control
 from remote_dev.result import make_result, utc_now_iso
+from remote_dev.core.errors import error_details
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,95}$")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -271,10 +274,16 @@ def start_remote_job(
                                     outcome=outcome, status=status, summary=summary, error=str(exc))
             failure["result"]["refs"] = {"job_record": str(path)}
             failure["result"]["session_id"] = job_id
+            failure["result"]["error_details"] = error_details(exc)
+            if failure["result"]["error_details"].get("submission_state") == "uncertain":
+                failure["result"]["status"] = "submission_uncertain"
+                failure["result"]["summary"] = "Remote submission outcome is uncertain; observe the original job."
+                failure["text"] = failure["result"]["summary"] + "\n"
             return failure
     return _session_result(endpoint, record, path, row, tool="remote.bash", started=started, start=start, budget=budget)
 
 
+@observed_tool("remote.job_status")
 @pinned_endpoint
 def remote_job_status(endpoint: Endpoint | None, *, job_id: str) -> dict[str, Any]:
     endpoint, record, _record_path = _load_record(endpoint, job_id)
@@ -291,7 +300,7 @@ def remote_job_status(endpoint: Endpoint | None, *, job_id: str) -> dict[str, An
             summary=f"Remote job {job_id} status failed.",
             started_at=started,
             duration_ms=_duration_ms(start),
-            extra={"job": {**record, "error": str(exc)[-4000:]}},
+            extra={"job": {**record, "error": str(exc)[-4000:]}, "error_details": error_details(exc)},
         )
         return {"text": result["summary"] + "\n", "result": result}
     status = str(supervisor.get("state") or "unknown")
@@ -308,6 +317,7 @@ def remote_job_status(endpoint: Endpoint | None, *, job_id: str) -> dict[str, An
     return {"text": f"Remote job {job_id}: {status}\n", "result": result}
 
 
+@observed_tool("remote.job_tail")
 @pinned_endpoint
 def remote_job_tail(endpoint: Endpoint | None, *, job_id: str, lines: int = 80, stream: str = "both") -> dict[str, Any]:
     endpoint, record, _record_path = _load_record(endpoint, job_id)
@@ -330,7 +340,7 @@ def remote_job_tail(endpoint: Endpoint | None, *, job_id: str, lines: int = 80, 
             summary=f"Remote job tail for {job_id} failed.",
             started_at=started,
             duration_ms=_duration_ms(start),
-            extra={"job_id": job_id, "error": str(exc)[-4000:]},
+            extra={"job_id": job_id, "error": str(exc)[-4000:], "error_details": error_details(exc)},
         )
         return {"text": result["summary"] + "\n", "result": result}
     requested: list[str] = []
@@ -379,6 +389,7 @@ def _output_budget_bytes(max_output_tokens: int | None) -> int:
     return max(4, min(MAX_INCREMENTAL_READ_BYTES, int(max_output_tokens) * 2))
 
 
+@observed_tool("remote.job_stdin")
 @pinned_endpoint
 def remote_job_stdin(endpoint: Endpoint | None, *, job_id: str, chars: str | None = None,
                      eof: bool = False, yield_time_ms: int | None = None,
@@ -420,6 +431,7 @@ def remote_job_stdin(endpoint: Endpoint | None, *, job_id: str, chars: str | Non
     return _session_result(endpoint, record, path, row, tool="remote.job_stdin", started=started, start=start, budget=budget)
 
 
+@observed_tool("remote.job_stop")
 @pinned_endpoint
 def remote_job_stop(endpoint: Endpoint | None, *, job_id: str, force: bool = False) -> dict[str, Any]:
     endpoint, record, _record_path = _load_record(endpoint, job_id)
@@ -440,7 +452,7 @@ def remote_job_stop(endpoint: Endpoint | None, *, job_id: str, force: bool = Fal
             summary=f"Remote job {job_id} stop failed.",
             started_at=started,
             duration_ms=_duration_ms(start),
-            extra={"job_id": job_id, "error": str(exc)[-4000:]},
+            extra={"job_id": job_id, "error": str(exc)[-4000:], "error_details": error_details(exc)},
         )
         return {"text": result["summary"] + "\n", "result": result}
     state = str(supervisor.get("state") or "unknown")

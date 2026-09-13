@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from remote_dev.observability import observed_tool
+
 import time
 from typing import Any
 
@@ -472,6 +474,7 @@ def _compact_matches(matches: list[Any]) -> tuple[list[str], bool]:
     return visible, truncated or len(visible) < len(matches)
 
 
+@observed_tool("remote.glob")
 @pinned_endpoint
 def remote_glob(
     endpoint: Endpoint,
@@ -517,12 +520,13 @@ def remote_glob(
         duration_ms=_duration_ms(start),
         preview={"matches": visible_matches, "truncated": bool(data.get("truncated", False)) or text_truncated},
         warnings=warnings,
-        extra={"matches": visible_matches, "truncated": bool(data.get("truncated", False)) or text_truncated, "error": data.get("error")},
+        extra={"matches": visible_matches, "truncated": bool(data.get("truncated", False)) or text_truncated, "error": data.get("error"), "error_details": data.get("error_details")},
     )
     text = compact_text("\n".join(visible_matches) + ("\n<truncated>\n" if data.get("truncated") or text_truncated else "\n"))
     return {"text": text, "result": result}
 
 
+@observed_tool("remote.grep")
 @pinned_endpoint
 def remote_grep(
     endpoint: Endpoint,
@@ -601,7 +605,7 @@ def remote_grep(
         duration_ms=_duration_ms(start),
         preview={"matches": visible_matches, "truncated": bool(data.get("truncated", False)) or text_truncated},
         warnings=warnings,
-        extra={"matches": visible_matches, "engine": data.get("engine"), "output_mode": output_mode, "offset": offset, "total_matches": data.get("total_matches"), "truncated": bool(data.get("truncated", False)) or text_truncated, "error": data.get("error")},
+        extra={"matches": visible_matches, "engine": data.get("engine"), "output_mode": output_mode, "offset": offset, "total_matches": data.get("total_matches"), "truncated": bool(data.get("truncated", False)) or text_truncated, "error": data.get("error"), "error_details": data.get("error_details")},
     )
     text = compact_text("\n".join(visible_matches) + ("\n<truncated>\n" if data.get("truncated") or text_truncated else "\n"))
     if status != "ok":
